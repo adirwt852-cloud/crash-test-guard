@@ -1,0 +1,86 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: crash-test-guard
+    main: ./cmd/crash-test-guard/main.go
+    binary: crash-test-guard
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: default
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--yes"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+    artifacts: all
+    optional: true
+
+brews:
+  - name: crash-test-guard
+    repository:
+      owner: crash-test-guard
+      name: homebrew-crash-test-guard
+      token: "{{ .Env.GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/crash-test-guard/crash-test-guard"
+    description: "Crash test guard"
+    license: "MIT"
+    install: |
+      bin.install "crash-test-guard"
+
+scoops:
+  - name: crash-test-guard
+    repository:
+      owner: crash-test-guard
+      name: scoop-crash-test-guard
+      token: "{{ .Env.GITHUB_TOKEN }}"
+    homepage: "https://github.com/crash-test-guard/crash-test-guard"
+    description: "Crash test guard"
+    license: "MIT"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  github:
+    owner: crash-test-guard
+    name: crash-test-guard
+  draft: false
+  prerelease: auto

@@ -112,7 +112,14 @@ func testCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
-			ex := executor.NewLocalExecutor()
+			var ex executor.Executor
+			if strings.TrimSpace(cfg.Agent.Image) != "" {
+				ex = executor.NewDockerExecutor(
+					executor.WithCrashType(executor.CrashContainerRestart),
+				)
+			} else {
+				ex = executor.NewLocalExecutor()
+			}
 			defer ex.Cleanup(context.Background())
 
 			client := protocol.NewClient(protocol.ClientConfig{
