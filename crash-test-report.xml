@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="crash-test-guard" tests="1" failures="0" errors="1" time="5.073">
+    <testcase name="process_kill" classname="crash-test-guard" time="2.889">
+      <error message="resume workflow: HTTP 404: not found&#xA;" type="isolation">scenario: process_kill&#xA;type: process_kill&#xA;status: ERROR&#xA;duration: 2.9s&#xA;pre_checkpoint: cp-3 seq=3&#xA;error: resume workflow: HTTP 404: not found</error>
+    </testcase>
+  </testsuite>
+</testsuites>
