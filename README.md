@@ -92,6 +92,21 @@ agent:
   startup_timeout: "30s"
   shutdown_timeout: "10s"
 
+  # Docker executor (optional)
+  image: "my-agent:latest"
+  network: "host"
+  volumes:
+    - "./data:/data"
+  env:
+    - "DATABASE_URL=postgres://..."
+
+  # Kubernetes executor (optional)
+  namespace: "production"
+  label_selector: "app=my-agent"
+  pod_name: "my-agent-pod"
+  service_account: "crash-test-guard"
+  kubeconfig: "/path/to/kubeconfig"
+
 crash_scenarios:
   - type: process_kill
     trigger:
@@ -176,8 +191,10 @@ Every enabled check must pass:
 | `process_term` | `SIGTERM` the agent process — graceful shutdown path |
 | `container_restart` | `docker kill` then `docker start` — restart same container |
 | `container_replace` | `docker rm -f` then fresh `docker run` — lose all ephemeral state |
+| `pod_delete` | Delete Kubernetes pod — K8s recreates it (same spec) |
+| `pod_replace` | Delete pod + fresh `kubectl run` — lose all ephemeral state |
 
-Container scenarios apply when `agent.image` is set in config; otherwise the local executor manages the process directly.
+Container scenarios apply when `agent.image` is set in config; Kubernetes scenarios apply when `agent.namespace`/`label_selector`/`pod_name` is set; otherwise the local executor manages the process directly.
 
 ---
 

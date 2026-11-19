@@ -111,6 +111,21 @@ agent:
   startup_timeout: 30s
   shutdown_timeout: 10s
 
+  # Docker executor (optional)
+  image: "my-agent:latest"
+  network: "host"
+  volumes:
+    - "./data:/data"
+  env:
+    - "DATABASE_URL=postgres://..."
+
+  # Kubernetes executor (optional)
+  namespace: "production"
+  label_selector: "app=my-agent"
+  pod_name: "my-agent-pod"
+  service_account: "crash-test-guard"
+  kubeconfig: "/path/to/kubeconfig"
+
 crash_scenarios:
   - type: process_kill
     trigger:
