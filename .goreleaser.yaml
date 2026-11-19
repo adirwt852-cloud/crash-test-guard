@@ -67,7 +67,7 @@ changelog:
 
 release:
   github:
-    owner: crash-test-guard
+    owner: adirwt852-cloud
     name: crash-test-guard
   draft: false
   prerelease: auto
