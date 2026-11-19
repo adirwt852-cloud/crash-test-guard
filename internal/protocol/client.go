@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -21,8 +22,10 @@ type ClientConfig struct {
 }
 
 type Client struct {
-	config     ClientConfig
-	httpClient *http.Client
+	config         ClientConfig
+	httpClient     *http.Client
+	lastSeqMu      sync.Mutex
+	lastSeqPerWF   map[string]int64
 }
 
 func NewClient(config ClientConfig) *Client {
@@ -50,11 +53,9 @@ func NewClient(config ClientConfig) *Client {
 	}
 
 	return &Client{
-		config: config,
-		httpClient: &http.Client{
-			Transport: transport,
-			Timeout:   config.RequestTimeout,
-		},
+		config:       config,
+		httpClient:   &http.Client{Transport: transport, Timeout: config.RequestTimeout},
+		lastSeqPerWF: make(map[string]int64),
 	}
 }
 
@@ -178,6 +179,73 @@ func (c *Client) GetEvents(ctx context.Context, workflowID string, sinceSeq int6
 		return nil, err
 	}
 	return resp, nil
+}
+
+func (c *Client) GetEventsSince(ctx context.Context, workflowID string, sinceSeq int64) ([]Event, error) {
+	events, err := c.GetEvents(ctx, workflowID, sinceSeq)
+	if err != nil {
+		return nil, err
+	}
+
+	c.lastSeqMu.Lock()
+	for _, e := range events {
+		if e.Sequence > c.lastSeqPerWF[workflowID] {
+			c.lastSeqPerWF[workflowID] = e.Sequence
+		}
+	}
+	c.lastSeqMu.Unlock()
+
+	return events, nil
+}
+
+func (c *Client) WaitForEvent(ctx context.Context, workflowID, eventType, stepID string, sinceSeq int64, timeout time.Duration) (*Event, error) {
+	c.lastSeqMu.Lock()
+	if sinceSeq == 0 {
+		sinceSeq = c.lastSeqPerWF[workflowID]
+	}
+	c.lastSeqMu.Unlock()
+
+	deadline := time.Now().Add(timeout)
+	delays := []time.Duration{
+		100 * time.Millisecond,
+		200 * time.Millisecond,
+		500 * time.Millisecond,
+		1 * time.Second,
+		2 * time.Second,
+		5 * time.Second,
+	}
+	delayIdx := 0
+
+	for {
+		if time.Now().After(deadline) {
+			return nil, context.DeadlineExceeded
+		}
+
+		events, err := c.GetEventsSince(ctx, workflowID, sinceSeq)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, e := range events {
+			if e.Type == eventType && (stepID == "" || e.StepID == stepID) {
+				return &e, nil
+			}
+		}
+
+		if len(events) > 0 {
+			sinceSeq = events[len(events)-1].Sequence
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delays[delayIdx]):
+		}
+
+		if delayIdx < len(delays)-1 {
+			delayIdx++
+		}
+	}
 }
 
 func (c *Client) ResumeWorkflow(ctx context.Context, workflowID, checkpoint string) (*ResumeResponse, error) {

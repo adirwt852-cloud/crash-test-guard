@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -62,9 +63,20 @@ func newWorkflow() *workflow {
 func runWorkflow(w *workflow) {
 	for i, step := range steps {
 		time.Sleep(200 * time.Millisecond)
+
+		// Mark the step as in progress. This is the pre-condition an
+		// orchestrator using trigger.timing == "before_event" detects so it
+		// can crash just before the completion event is emitted.
 		mu.Lock()
 		w.currentStep = step
-		// side effect tracking
+		w.status = "running"
+		mu.Unlock()
+
+		// Simulate step work before the completion event is emitted. This
+		// window is what makes a before_event crash land before the event.
+		time.Sleep(150 * time.Millisecond)
+
+		mu.Lock()
 		key := step + "-key"
 		if _, ok := w.idempotency[key]; !ok {
 			w.idempotency[key] = fmt.Sprintf("effect-%s-%d", step, i)
@@ -80,12 +92,12 @@ func runWorkflow(w *workflow) {
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 			Data:      map[string]any{"step": step},
 		})
-		// checkpoint after each step
 		w.checkpointID = fmt.Sprintf("cp-%d", w.sequence)
-		w.status = "running"
 		if i == len(steps)-1 {
 			w.status = "completed"
 			w.currentStep = ""
+		} else {
+			w.status = "running"
 		}
 		mu.Unlock()
 	}
@@ -168,7 +180,25 @@ func handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	writeJSON(w, wf.events)
+
+	since := int64(0)
+	if v := r.URL.Query().Get("since"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			since = n
+		}
+	}
+
+	events := wf.events
+	if since > 0 {
+		filtered := make([]event, 0, len(wf.events))
+		for _, ev := range wf.events {
+			if ev.Sequence > since {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
+	writeJSON(w, events)
 }
 
 func handleResume(w http.ResponseWriter, r *http.Request) {

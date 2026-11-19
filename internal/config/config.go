@@ -31,6 +31,12 @@ type AgentConfig struct {
 	Endpoint        string   `yaml:"endpoint"`
 	StartupTimeout  Duration `yaml:"startup_timeout"`
 	ShutdownTimeout Duration `yaml:"shutdown_timeout"`
+
+	// Container settings used by the Docker executor.
+	Image   string   `yaml:"image"`
+	Network string   `yaml:"network"`
+	Volumes []string `yaml:"volumes"`
+	Env     []string `yaml:"env"`
 }
 
 // CrashScenario defines one crash test scenario.
@@ -144,7 +150,7 @@ func (c *Config) Validate() error {
 
 // Validate checks the agent configuration.
 func (a *AgentConfig) Validate() error {
-	if len(a.Command) == 0 {
+	if len(a.Command) == 0 && strings.TrimSpace(a.Image) == "" {
 		return fmt.Errorf("command is required")
 	}
 	if a.Protocol == "" {

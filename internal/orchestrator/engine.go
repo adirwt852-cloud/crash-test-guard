@@ -17,6 +17,11 @@ const (
 	ExitError = 2
 )
 
+// preEventDelay is how long to wait after detecting the pre-condition before
+// injecting a before_event crash, so the crash lands before the event is
+// emitted.
+const preEventDelay = 60 * time.Millisecond
+
 type Status string
 
 const (
@@ -147,14 +152,43 @@ func (e *Engine) runScenario(ctx context.Context, sc config.CrashScenario, basel
 	}
 	wfID := startResp.WorkflowID
 
-	if err := e.waitForTrigger(ctx, wfID, sc.Trigger, sc.Fallback); err != nil {
-		if sc.Fallback.OnMissed == "skip" {
-			res.Status = StatusPass
-			return res
+	// Event-based crash triggering. Wait for the configured trigger event so
+	// the crash lands at a deterministic point in the workflow execution.
+	switch sc.Trigger.Timing {
+	case "before_event":
+		// Crash just before the event would be emitted: wait until the target
+		// step is in progress (pre-condition), then delay briefly so the crash
+		// lands before the event fires.
+		if err := e.waitForPreCondition(ctx, wfID, sc.Trigger.StepID); err != nil {
+			switch sc.Fallback.OnMissed {
+			case "skip":
+				res.Status = StatusPass
+				return res
+			case "continue":
+				// proceed to crash injection without the pre-condition
+			default:
+				res.Status = StatusError
+				res.Error = fmt.Errorf("wait for pre-condition for step %q: %w", sc.Trigger.StepID, err)
+				return res
+			}
 		}
-		res.Status = StatusError
-		res.Error = fmt.Errorf("wait for trigger: %w", err)
-		return res
+		time.Sleep(preEventDelay)
+	case "after_event":
+		ev, err := e.client.WaitForEvent(ctx, wfID, sc.Trigger.Event, sc.Trigger.StepID, 0, sc.Fallback.Timeout.Duration)
+		if err != nil {
+			switch sc.Fallback.OnMissed {
+			case "skip":
+				res.Status = StatusPass
+				return res
+			case "continue":
+				// proceed to crash injection without the event
+			default:
+				res.Status = StatusError
+				res.Error = fmt.Errorf("wait for trigger event %q for step %q: %w", sc.Trigger.Event, sc.Trigger.StepID, err)
+				return res
+			}
+		}
+		_ = ev
 	}
 
 	preCP, err := e.client.GetCheckpoint(ctx, wfID)
@@ -170,6 +204,8 @@ func (e *Engine) runScenario(ctx context.Context, sc config.CrashScenario, basel
 		res.Error = fmt.Errorf("inject crash: %w", err)
 		return res
 	}
+
+	e.setExecutorCrashType(sc.Type)
 
 	if err := e.executor.Restart(ctx); err != nil {
 		res.Status = StatusError
@@ -213,6 +249,17 @@ func (e *Engine) runScenario(ctx context.Context, sc config.CrashScenario, basel
 	return res
 }
 
+func (e *Engine) setExecutorCrashType(scenarioType string) {
+	if dockerEx, ok := e.executor.(*executor.DockerExecutor); ok {
+		switch scenarioType {
+		case "container_replace":
+			_ = dockerEx.SetCrashType(executor.CrashContainerReplace)
+		case "container_restart":
+			_ = dockerEx.SetCrashType(executor.CrashContainerRestart)
+		}
+	}
+}
+
 func (e *Engine) waitForHealth(ctx context.Context) error {
 	timeout := e.config.Agent.StartupTimeout.Duration
 	if timeout <= 0 {
@@ -238,19 +285,13 @@ func (e *Engine) waitForHealth(ctx context.Context) error {
 	}
 }
 
-func (e *Engine) waitForTrigger(ctx context.Context, wfID string, trigger config.Trigger, fallback config.Fallback) error {
-	if trigger.Timing == "before_event" {
-		return nil
-	}
-
-	var sinceSeq int64
-	timeout := fallback.Timeout.Duration
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-	ticker := time.NewTicker(250 * time.Millisecond)
+// waitForPreCondition polls GetState until the target step is in progress
+// (current_step == step_id), indicating its completion event is about to be
+// emitted. Used for trigger.timing == "before_event".
+func (e *Engine) waitForPreCondition(ctx context.Context, wfID, stepID string) error {
+	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
-	timer := time.NewTimer(timeout)
+	timer := time.NewTimer(30 * time.Second)
 	defer timer.Stop()
 
 	for {
@@ -258,24 +299,14 @@ func (e *Engine) waitForTrigger(ctx context.Context, wfID string, trigger config
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timer.C:
-			switch fallback.OnMissed {
-			case "skip", "continue":
-				return nil
-			default:
-				return fmt.Errorf("trigger event %q for step %q not observed within %s", trigger.Event, trigger.StepID, timeout)
-			}
+			return fmt.Errorf("pre-condition not met: step %q never started", stepID)
 		case <-ticker.C:
-			events, err := e.client.GetEvents(ctx, wfID, sinceSeq)
+			state, err := e.client.GetState(ctx, wfID)
 			if err != nil {
 				continue
 			}
-			for _, ev := range events {
-				if ev.Sequence > sinceSeq {
-					sinceSeq = ev.Sequence
-				}
-				if ev.Type == trigger.Event && ev.StepID == trigger.StepID {
-					return nil
-				}
+			if state.CurrentStep == stepID {
+				return nil
 			}
 		}
 	}
