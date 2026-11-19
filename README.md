@@ -1,21 +1,13 @@
-<div align="center">
-
 # Crash-Test Guard
 
 **Prove your AI agent survives a crash — before production finds out.**
 
-A CI/CD reliability gate for stateful, multi-step AI agents.
+A CI/CD reliability gate for stateful, multi-step AI agents. It starts your agent, crashes it at a specific point, restarts it, and verifies it recovers correctly — no duplicate payments, no lost steps, no corrupted checkpoints.
 
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![CI](https://img.shields.io/github/actions/workflow/status/adirwt852-cloud/crash-test-guard/ci.yml?branch=main&label=CI)](https://github.com/adirwt852-cloud/crash-test-guard/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/adirwt852-cloud/crash-test-guard?display_name=tag)](https://github.com/adirwt852-cloud/crash-test-guard/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/adirwt852-cloud/crash-test-guard)](https://goreportcard.com/report/github.com/adirwt852-cloud/crash-test-guard)
-[![Coverage](https://img.shields.io/codecov/c/github/adirwt852-cloud/crash-test-guard)](https://codecov.io/gh/adirwt852-cloud/crash-test-guard)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-
-[Quickstart](docs/quickstart.md) · [Protocol](docs/protocol.md) · [Build an Adapter](docs/adapter-development.md) · [Contributing](CONTRIBUTING.md)
-
-</div>
 
 ---
 
@@ -23,7 +15,7 @@ A CI/CD reliability gate for stateful, multi-step AI agents.
 
 Your agent is halfway through a business workflow when the container dies:
 
-```text
+```
 1. Read customer email        ✓
 2. Generate invoice           ✓
 3. Process payment            ✓  ← CRASH
@@ -31,8 +23,7 @@ Your agent is halfway through a business workflow when the container dies:
 5. Complete task              ○
 ```
 
-After restart, which of these is true?
-
+After restart:
 - Does it resume at step 3, or replay from step 1?
 - Does it charge the customer **twice**?
 - Does it send a **duplicate** confirmation email?
@@ -55,32 +46,47 @@ No SDK. No rewrite. Just six HTTP endpoints.
 
 ---
 
-## How It Works
+## Quick Start
 
-### 1. Speak the protocol
+### 1. Install
 
-Any language. Any framework. Six HTTP endpoints:
+```bash
+# macOS / Linux
+brew tap crash-test-guard/tap https://github.com/crash-test-guard/homebrew-crash-test-guard
+brew install crash-test-guard
+
+# Windows
+scoop bucket add crash-test-guard https://github.com/crash-test-guard/scoop-crash-test-guard
+scoop install crash-test-guard
+
+# Or download from GitHub Releases
+```
+
+### 2. Add the protocol to your agent
+
+Your agent (any language/framework) implements **6 HTTP endpoints**:
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/health` | `GET` | Liveness + protocol version negotiation |
-| `/workflow/start` | `POST` | Start a workflow, return a `workflow_id` |
-| `/workflow/{id}/state` | `GET` | Current status, current step, completed steps |
-| `/workflow/{id}/checkpoint` | `GET` | Serializable checkpoint (sequence + payload) |
-| `/workflow/{id}/events` | `GET` | Event stream used to time crash injection |
-| `/workflow/{id}/resume` | `POST` | Resume execution from the latest checkpoint |
+| `/health` | GET | Liveness + protocol version |
+| `/workflow/start` | POST | Start workflow, return `workflow_id` |
+| `/workflow/{id}/state` | GET | Current step, completed steps, outputs |
+| `/workflow/{id}/checkpoint` | GET | Serializable checkpoint (opaque) |
+| `/workflow/{id}/events` | GET | Event stream for crash timing |
+| `/workflow/{id}/resume` | POST | Resume from checkpoint |
 
-Full schemas and error semantics: **[docs/protocol.md](docs/protocol.md)**.
+[Full protocol spec →](docs/protocol.md) | [Build an adapter →](docs/adapter-development.md)
 
-### 2. Describe the crash you care about
+**Reference implementation:** [`examples/langgraph-agent/`](examples/langgraph-agent/) (FastAPI + LangGraph + PostgreSQL)
 
-Scenarios are **trigger-based**, not sleep-based. The guard waits for a real workflow event and crashes at the exact boundary you specify:
+### 3. Configure your crash test
 
+`crash-test.yaml`:
 ```yaml
 version: "1.0"
 
 agent:
-  command: ["python", "agent.py"]
+  command: ["python", "my_agent.py"]
   protocol: http
   endpoint: "http://localhost:8080"
   startup_timeout: "30s"
@@ -89,12 +95,12 @@ agent:
 crash_scenarios:
   - type: process_kill
     trigger:
-      event: step_completed        # workflow event to wait for
-      step_id: process_payment     # specific step
-      timing: after_event          # before_event | after_event
+      event: step_completed
+      step_id: process_payment
+      timing: after_event
     fallback:
-      timeout: 30s                 # give up waiting after this
-      on_missed: fail              # fail | skip | continue
+      timeout: 30s
+      on_missed: fail
 
 verification:
   checkpoint_consistency: true
@@ -103,76 +109,61 @@ verification:
   baseline_comparison: true
 
 reporting:
-  format: human                    # human | junit | json
-  output: ""
-  verbose: false
+  format: junit
+  output: "crash-test-report.xml"
 
 deployment:
   fail_on_error: true
 ```
 
-### 3. Run it in CI
+[All config options →](configs/crash-test.example.yaml) | [6 crash windows →](configs/)
+
+### 4. Run locally
 
 ```bash
 crash-test-guard test --config crash-test.yaml
+# Exit 0 = PASS, 1 = FAIL, 2 = ERROR
 ```
 
-| Exit code | Meaning | CI action |
-|-----------|---------|-----------|
-| `0` | PASS — agent recovered correctly | Deploy |
-| `1` | FAIL — recovery invariants violated | Block deploy |
-| `2` | ERROR — harness or config problem | Fix the pipeline |
+### 5. Add to CI/CD
 
----
-
-## Installation
-
-### Homebrew (macOS / Linux)
-
-```bash
-brew install crash-test-guard/tap/crash-test-guard
+**GitHub Actions:**
+```yaml
+- name: Crash test
+  run: |
+    crash-test-guard test --config crash-test.yaml --report-format junit
 ```
 
-### Scoop (Windows)
-
-```powershell
-scoop bucket add crash-test-guard https://github.com/crash-test-guard/scoop-crash-test-guard
-scoop install crash-test-guard
+**GitLab CI:**
+```yaml
+crash_test:
+  script:
+    - crash-test-guard test --config crash-test.yaml --report-format junit
+  artifacts:
+    reports:
+      junit: crash-test-report.xml
 ```
 
-### Binary download
-
-```bash
-curl -sSL https://github.com/adirwt852-cloud/crash-test-guard/releases/latest/download/crash-test-guard_linux_amd64.tar.gz | tar xz
-chmod +x crash-test-guard
+**Jenkins:**
+```groovy
+stage('Crash Test') {
+  sh 'crash-test-guard test --config crash-test.yaml --report-format junit'
+  junit 'crash-test-report.xml'
+}
 ```
-
-Prebuilt archives are published for Linux, macOS, and Windows on amd64 and arm64.
-
----
-
-## CLI Reference
-
-| Command | Description |
-|---------|-------------|
-| `crash-test-guard test --config <file>` | Run the crash scenarios in a config file |
-| `crash-test-guard test -c <file> --report-format junit\|json\|human` | Override the report format |
-| `crash-test-guard test -c <file> -v` | Verbose output |
-| `crash-test-guard version` | Print version information |
-| `crash-test-guard completion [bash\|zsh\|fish\|powershell]` | Generate shell completion |
 
 ---
 
 ## Verification Checks
 
-Every enabled check must pass for the scenario to pass.
+Every enabled check must pass:
 
 | Check | What it validates |
 |-------|-------------------|
-| **Checkpoint Consistency** | The checkpoint is readable after recovery, belongs to the same workflow, and its sequence never regresses |
+| **Checkpoint Consistency** | Checkpoint is readable, same workflow, sequence never regresses |
 | **Monotonic Progress** | No completed step is lost; execution only moves forward |
-| **Duplicate Side Effects** | Each idempotency key is observed exactly once across crash + resume |
-| **Workflow Completion** | Every expected step runs and the final state is `completed` |
+| **Duplicate Side Effects** | Each idempotency key observed exactly once across crash + resume |
+| **Workflow Completion** | Every expected step runs, final state is `completed` |
 | **Output Equivalence** | Final status matches a crash-free baseline run |
 
 ---
@@ -183,22 +174,10 @@ Every enabled check must pass for the scenario to pass.
 |----------|--------------|
 | `process_kill` | `SIGKILL` the agent process — no cleanup, no flush |
 | `process_term` | `SIGTERM` the agent process — graceful shutdown path |
-| `container_restart` | `docker kill` then `docker start` — restart the same container |
-| `container_replace` | `docker rm -f` then a fresh `docker run` — lose all ephemeral state |
+| `container_restart` | `docker kill` then `docker start` — restart same container |
+| `container_replace` | `docker rm -f` then fresh `docker run` — lose all ephemeral state |
 
-Container scenarios apply when `agent.image` is set in the config; otherwise the local executor manages the agent process directly.
-
----
-
-## Examples
-
-| Example | Stack | Checkpoint store |
-|---------|-------|------------------|
-| [`examples/langgraph-agent`](examples/langgraph-agent/) | [LangGraph](https://langchain-ai.github.io/langgraph/) | PostgreSQL |
-
-The reference adapter shows durable checkpoints, event emission for precise crash timing, and an idempotency ledger. Use it as a template for your own agent: **[docs/adapter-development.md](docs/adapter-development.md)**.
-
-A minimal end-to-end walkthrough lives in **[docs/quickstart.md](docs/quickstart.md)**.
+Container scenarios apply when `agent.image` is set in config; otherwise the local executor manages the process directly.
 
 ---
 
@@ -206,22 +185,49 @@ A minimal end-to-end walkthrough lives in **[docs/quickstart.md](docs/quickstart
 
 | Document | Contents |
 |----------|----------|
-| [docs/quickstart.md](docs/quickstart.md) | Install, configure, and get a first passing run in ~15 minutes |
-| [docs/protocol.md](docs/protocol.md) | Complete agent protocol specification |
-| [docs/adapter-development.md](docs/adapter-development.md) | How to implement the protocol for a new framework |
+| [Quickstart](docs/quickstart.md) | Install, configure, first passing run in ~15 minutes |
+| [Protocol](docs/protocol.md) | Complete agent protocol specification |
+| [Adapter Development](docs/adapter-development.md) | How to implement the protocol for a new framework |
+| [Example Configs](configs/) | Ready-to-use configs for 6 crash windows |
+
+---
+
+## Examples
+
+| Example | Stack | Checkpoint Store |
+|---------|-------|------------------|
+| [`examples/langgraph-agent`](examples/langgraph-agent/) | [LangGraph](https://langchain-ai.github.io/langgraph/) | PostgreSQL |
+
+The reference adapter shows durable checkpoints, event emission for precise crash timing, and an idempotency ledger. Use it as a template for your own agent.
+
+---
+
+## Installation Details
+
+Prebuilt binaries for Linux, macOS, and Windows on amd64 and arm64.
+
+| Platform | Download |
+|----------|----------|
+| Linux amd64 | `crash-test-guard_<version>_linux_amd64.tar.gz` |
+| Linux arm64 | `crash-test-guard_<version>_linux_arm64.tar.gz` |
+| macOS amd64 | `crash-test-guard_<version>_darwin_amd64.tar.gz` |
+| macOS arm64 | `crash-test-guard_<version>_darwin_arm64.tar.gz` |
+| Windows amd64 | `crash-test-guard_<version>_windows_amd64.zip` |
+
+Verify with `checksums.txt` (SHA256).
 
 ---
 
 ## Contributing
 
-Contributions are welcome — new adapters, crash scenarios, and reporters especially.
+Contributions welcome — new adapters, crash scenarios, and reporters especially.
 
 1. Fork the repo and create a feature branch
 2. Add tests for your change
 3. Run `make lint test`
 4. Open a pull request
 
-See **[CONTRIBUTING.md](CONTRIBUTING.md)** for development setup and guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
 ---
 
@@ -237,8 +243,6 @@ Apache-2.0 — see [LICENSE](LICENSE).
 - **Bugs & feature requests:** [GitHub Issues](https://github.com/adirwt852-cloud/crash-test-guard/issues)
 - **Security reports:** see [SECURITY.md](SECURITY.md)
 
-<div align="center">
+---
 
 **Ship agents that survive the crash, not agents that discover it in production.**
-
-</div>
