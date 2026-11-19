@@ -1,0 +1,47 @@
+run:
+  go: "1.22"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - gosimple
+    - unused
+    - misspell
+    - unconvert
+    - prealloc
+    - bodyclose
+    - copyloopvar
+    - exhaustive
+    - gocyclo
+    - gosec
+    - revive
+
+linters-settings:
+  errcheck:
+    check-type-assertions: false
+    check-blank: false
+    exclude-functions:
+      - "io/ioutil.ReadAll"
+      - "json.NewEncoder.*Encode"
+      - "fmt.Sscanf"
+  golangci-lint:
+    exclude-rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+      - path: cmd/crash-test-guard/main\.go
+        linters:
+          - errcheck
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+    - path: cmd/crash-test-guard/main\.go
+      linters:
+        - errcheck
+  exclude-use-default: false

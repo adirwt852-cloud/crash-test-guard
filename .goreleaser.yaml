@@ -35,18 +35,6 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
-signs:
-  - cmd: cosign
-    signature: "${artifact}.sig"
-    certificate: "${artifact}.pem"
-    args:
-      - sign-blob
-      - "--yes"
-      - "--output-signature=${signature}"
-      - "--output-certificate=${certificate}"
-      - "${artifact}"
-    artifacts: all
-
 brews:
   - name: crash-test-guard
     repository:
