@@ -37,6 +37,23 @@ type AgentConfig struct {
 	Network string   `yaml:"network"`
 	Volumes []string `yaml:"volumes"`
 	Env     []string `yaml:"env"`
+
+	// Kubernetes settings used by the Kubernetes executor.
+	Namespace      string `yaml:"namespace"`
+	LabelSelector  string `yaml:"label_selector"`
+	PodName        string `yaml:"pod_name"`
+	ServiceAccount string `yaml:"service_account"`
+	Kubeconfig     string `yaml:"kubeconfig"`
+}
+
+// KubernetesEnabled reports whether the agent is configured to run on
+// Kubernetes rather than locally or in Docker.
+func (a *AgentConfig) KubernetesEnabled() bool {
+	return strings.TrimSpace(a.Namespace) != "" ||
+		strings.TrimSpace(a.LabelSelector) != "" ||
+		strings.TrimSpace(a.PodName) != "" ||
+		strings.TrimSpace(a.ServiceAccount) != "" ||
+		strings.TrimSpace(a.Kubeconfig) != ""
 }
 
 // CrashScenario defines one crash test scenario.
@@ -150,8 +167,11 @@ func (c *Config) Validate() error {
 
 // Validate checks the agent configuration.
 func (a *AgentConfig) Validate() error {
-	if len(a.Command) == 0 && strings.TrimSpace(a.Image) == "" {
+	if len(a.Command) == 0 && strings.TrimSpace(a.Image) == "" && !a.KubernetesEnabled() {
 		return fmt.Errorf("command is required")
+	}
+	if a.KubernetesEnabled() && strings.TrimSpace(a.PodName) == "" && strings.TrimSpace(a.LabelSelector) == "" && strings.TrimSpace(a.Image) == "" {
+		return fmt.Errorf("kubernetes agent requires pod_name, label_selector, or image")
 	}
 	if a.Protocol == "" {
 		a.Protocol = DefaultProtocol
@@ -171,7 +191,7 @@ func (s *CrashScenario) Validate(index int) error {
 		return fmt.Errorf("crash_scenarios[%d]: type is required", index)
 	}
 	switch s.Type {
-	case "process_kill", "process_term", "container_restart", "container_replace":
+	case "process_kill", "process_term", "container_restart", "container_replace", "pod_delete", "pod_replace":
 		// valid
 	default:
 		return fmt.Errorf("crash_scenarios[%d]: unsupported type %q", index, s.Type)

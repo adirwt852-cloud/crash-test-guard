@@ -113,11 +113,20 @@ func testCmd() *cobra.Command {
 			defer stop()
 
 			var ex executor.Executor
-			if strings.TrimSpace(cfg.Agent.Image) != "" {
+			switch {
+			case cfg.Agent.KubernetesEnabled():
+				ex = executor.NewKubernetesExecutor(
+					executor.WithKubeconfig(cfg.Agent.Kubeconfig),
+					executor.WithKubernetesNamespace(cfg.Agent.Namespace),
+					executor.WithPodName(cfg.Agent.PodName),
+					executor.WithLabelSelector(cfg.Agent.LabelSelector),
+					executor.WithKubernetesCrashType(executor.CrashPodDelete),
+				)
+			case strings.TrimSpace(cfg.Agent.Image) != "":
 				ex = executor.NewDockerExecutor(
 					executor.WithCrashType(executor.CrashContainerRestart),
 				)
-			} else {
+			default:
 				ex = executor.NewLocalExecutor()
 			}
 			defer ex.Cleanup(context.Background())

@@ -258,6 +258,14 @@ func (e *Engine) setExecutorCrashType(scenarioType string) {
 			_ = dockerEx.SetCrashType(executor.CrashContainerRestart)
 		}
 	}
+	if k8sEx, ok := e.executor.(*executor.KubernetesExecutor); ok {
+		switch scenarioType {
+		case "pod_replace":
+			_ = k8sEx.SetCrashType(executor.CrashPodReplace)
+		case "pod_delete":
+			_ = k8sEx.SetCrashType(executor.CrashPodDelete)
+		}
+	}
 }
 
 func (e *Engine) waitForHealth(ctx context.Context) error {

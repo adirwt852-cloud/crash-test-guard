@@ -1,0 +1,32 @@
+version: "1.0"
+
+agent:
+  command: ["/workspace/examples/langgraph-agent/venv/bin/python", "/workspace/examples/langgraph-agent/agent.py"]
+  protocol: http
+  endpoint: "http://localhost:8080"
+  startup_timeout: "30s"
+  shutdown_timeout: "10s"
+
+crash_scenarios:
+  - type: process_kill
+    trigger:
+      event: step_completed
+      step_id: process_payment
+      timing: after_event
+    fallback:
+      timeout: 30s
+      on_missed: fail
+
+verification:
+  checkpoint_consistency: true
+  duplicate_side_effects: true
+  workflow_completion: true
+  baseline_comparison: true
+
+reporting:
+  format: human
+  output: ""
+  verbose: true
+
+deployment:
+  fail_on_error: true
