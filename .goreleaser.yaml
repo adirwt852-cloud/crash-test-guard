@@ -38,7 +38,7 @@ checksum:
 brews:
   - name: crash-test-guard
     repository:
-      owner: adirwt852-cloud
+      owner: crash-test-guard
       name: homebrew-crash-test-guard
       token: "{{ .Env.GITHUB_TOKEN }}"
     directory: Formula
@@ -51,7 +51,7 @@ brews:
 scoops:
   - name: crash-test-guard
     repository:
-      owner: adirwt852-cloud
+      owner: crash-test-guard
       name: scoop-crash-test-guard
       token: "{{ .Env.GITHUB_TOKEN }}"
     homepage: "https://github.com/crash-test-guard/crash-test-guard"
@@ -67,7 +67,7 @@ changelog:
 
 release:
   github:
-    owner: adirwt852-cloud
+    owner: crash-test-guard
     name: crash-test-guard
   draft: false
   prerelease: auto
